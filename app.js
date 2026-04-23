@@ -16,10 +16,17 @@ let selectedRoomName = null;
 let currentUserId    = null;
 let currentUserRole  = null;
 let selectedCells    = [];
-let roomsCache       = [];   // { id, name }[]
+let roomsCache       = [];
 
 const WEEK  = ["일","월","화","수","목","금","토"];
 const HOURS = ["09:00~10:00","10:00~11:00","11:00~12:00","12:00~13:00","13:00~14:00","14:00~15:00","15:00~16:00","16:00~17:00","17:00~18:00"];
+const DEPT_ORDER = ["에너지1부","에너지2부","에너지3부","기전부","사업전략부"];
+
+function sortDepts(deptSet) {
+    const sorted = DEPT_ORDER.filter(d => deptSet.has(d));
+    const rest   = [...deptSet].filter(d => !DEPT_ORDER.includes(d)).sort((a,b) => a.localeCompare(b,"ko"));
+    return [...sorted, ...rest];
+}
 
 // ── LOGIN ──────────────────────────────────────────────────
 document.getElementById("loginBtn").addEventListener("click", async () => {
@@ -34,8 +41,8 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
 
     const user = docSnap.data();
 
-    // 비밀번호 확인 (미설정 시 초기값 = 0000)
-    const storedPw = user.password ?? "0000";
+    // 비밀번호 확인 (미설정 시 초기값 = 사용자 ID)
+    const storedPw = user.password ?? empNo;
     if (pw !== storedPw) { alert("비밀번호가 올바르지 않습니다."); return; }
 
     currentUserId   = empNo;
@@ -50,7 +57,7 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
         document.getElementById("adminArea").style.display = "none";
     }
 
-    // 초기 비밀번호(사번) 사용 중이면 변경 팝업 표시
+    // 초기 비밀번호 사용 중이면 변경 팝업 표시
     if (!user.password) {
         openPwPopup();
     }
@@ -81,10 +88,8 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
     if (roomsCache.length > 0) {
         selectedRoomId   = roomsCache[0].id;
         selectedRoomName = roomsCache[0].name;
-
         const firstLi = document.querySelector("#roomList li");
         if (firstLi) firstLi.classList.add("active");
-
         renderSchedule();
     }
 });
@@ -117,7 +122,6 @@ function renderSchedule() {
     for (let i = 0; i < 14; i++) {
         const d = new Date(today);
         d.setDate(today.getDate() + i);
-
         days.push({
             label: `${d.getMonth()+1}/${d.getDate()}(${WEEK[d.getDay()]})`,
             day: d.getDay()
@@ -126,19 +130,17 @@ function renderSchedule() {
 
     let html = "<table><tr><th></th>";
     days.forEach(d => {
-    const weekend = (d.day === 0 || d.day === 6) ? "weekend" : "";
-    html += `<th class="${weekend}">${d.label}</th>`;
-});
+        const weekend = (d.day === 0 || d.day === 6) ? "weekend" : "";
+        html += `<th class="${weekend}">${d.label}</th>`;     
+    });
     html += "</tr>";
     HOURS.forEach(h => {
         html += `<tr><td>${h}</td>`;
         days.forEach(d => {
             const weekend = (d.day === 0 || d.day === 6) ? "weekend" : "";
-            html += `<td class="cell ${weekend}" 
-                        data-date="${d.label}" 
-                        data-time="${h}"></td>`;
+            html += `<td class="cell ${weekend}" data-date="${d.label}" data-time="${h}"></td>`;
         });
-                html += "</tr>";
+        html += "</tr>";
     });
     html += "</table>";
 
@@ -157,7 +159,6 @@ function renderSchedule() {
                 return;
             }
 
-            // 빈 셀 토글 선택
             if (cell.classList.contains("selected")) {
                 cell.classList.remove("selected");
                 selectedCells = selectedCells.filter(c => c !== cell);
@@ -172,7 +173,6 @@ function renderSchedule() {
 
 // ── LOAD RESERVATIONS ──────────────────────────────────────
 async function loadReservations() {
-    // 일반 예약
     const snap = await getDocs(collection(db, "reservations"));
     snap.forEach(d => {
         const data = d.data();
@@ -181,10 +181,10 @@ async function loadReservations() {
         const dateStr = `${s.getMonth()+1}/${s.getDate()}(${WEEK[s.getDay()]})`;
         const h = s.getHours();
         const timeStr = `${String(h).padStart(2,"0")}:00~${String(h+1).padStart(2,"0")}:00`;
-        setCell(dateStr, timeStr, "reserved", data.title || data.createdByName, data.projectName, false, data.createdByName);
+        const displayName = data.creatorRole === 'admin' ? '관리자' : data.createdByName;
+        setCell(dateStr, timeStr, "reserved", data.title || displayName, data.projectName, false, displayName);
     });
 
-    // 정기 회의
     const rSnap = await getDocs(collection(db, "recurringMeetings"));
     document.querySelectorAll(".cell:not(.reserved)").forEach(cell => {
         const dayIdx = getDayIndexFromDateStr(cell.dataset.date);
@@ -193,7 +193,8 @@ async function loadReservations() {
             const data = d.data();
             if (data.roomId !== selectedRoomId) return;
             if (data.dayOfWeek === dayIdx && data.startHour === hour) {
-                setCell(cell.dataset.date, cell.dataset.time, "recurring", data.title, data.projectName, true, data.createdByName);
+                const rDisplayName = data.creatorRole === 'admin' ? '관리자' : data.createdByName;
+                setCell(cell.dataset.date, cell.dataset.time, "recurring", data.title, data.projectName, true, rDisplayName);
             }
         });
     });
@@ -207,14 +208,13 @@ function setCell(dateStr, timeStr, cssClass, nameTxt, projectTxt, isRecurring, c
         <div class="cell-name${isRecurring ? " is-recurring" : ""}">
             ${isRecurring ? "🔄 " : ""}${nameTxt || ""}
         </div>
-        <div class="cell-project">${(projectTxt || "").substring(0, 8)}</div>
+        <div class="cell-project">${(projectTxt || "")}</div>
         ${creatorName ? `<div class="cell-creator">${creatorName}</div>` : ""}
     `;
 }
 
 // ── FIND RESERVATION ───────────────────────────────────────
 async function findReservation(date, time) {
-    // 일반 예약 검색
     const snap = await getDocs(collection(db, "reservations"));
     for (const d of snap.docs) {
         const data = d.data();
@@ -226,7 +226,6 @@ async function findReservation(date, time) {
         if (dateStr === date && timeStr === time) return { id: d.id, ...data };
     }
 
-    // 정기 회의 검색
     const dayIdx = getDayIndexFromDateStr(date);
     const hour   = parseInt(time.split(":")[0]);
     const rSnap  = await getDocs(collection(db, "recurringMeetings"));
@@ -247,12 +246,10 @@ async function openReservePopup(date, time, cell, existing = null) {
     const isOwner     = !existing || existing.createdBy === currentUserId;
     const isAdmin     = currentUserRole === "admin";
 
-    // 버튼 표시 제어
     const saveBtn   = document.getElementById("saveReserveBtn");
     const deleteBtn = document.getElementById("deleteReserveBtn");
 
     if (isRecurring) {
-        // 정기 회의: 저장 불가, 관리자만 삭제
         saveBtn.style.display   = "none";
         deleteBtn.style.display = isAdmin ? "flex" : "none";
     } else {
@@ -265,7 +262,6 @@ async function openReservePopup(date, time, cell, existing = null) {
     document.getElementById("deptSelect").disabled    = !editable;
     document.getElementById("projectSelect").disabled = !editable;
 
-    // 제목
     document.getElementById("popupTitle").innerText = isRecurring
         ? `🔄 정기 회의 · ${existing.title}`
         : `${selectedRoomName}  ${date}  ${time}`;
@@ -277,7 +273,7 @@ async function openReservePopup(date, time, cell, existing = null) {
 
     const deptSelect = document.getElementById("deptSelect");
     deptSelect.innerHTML = "";
-    deptSet.forEach(dept => {
+    sortDepts(deptSet).forEach(dept => {
         const opt = document.createElement("option");
         opt.value = opt.text = dept;
         deptSelect.appendChild(opt);
@@ -309,7 +305,6 @@ async function openReservePopup(date, time, cell, existing = null) {
     document.getElementById("closePopupBtn").onclick = () =>
         (document.getElementById("reservePopup").style.display = "none");
 
-    // 삭제
     deleteBtn.onclick = async () => {
         const label = isRecurring ? "정기 회의를" : "예약을";
         if (!confirm(`이 ${label} 삭제하시겠습니까?`)) return;
@@ -318,7 +313,6 @@ async function openReservePopup(date, time, cell, existing = null) {
         renderSchedule();
     };
 
-    // 저장
     saveBtn.onclick = async () => {
         const meetingTitle = document.getElementById("reserveTitle").value.trim();
         if (!meetingTitle) { alert("회의 제목을 입력하세요"); return; }
@@ -332,13 +326,12 @@ async function openReservePopup(date, time, cell, existing = null) {
 
         const targets = window._multiCells || [cell];
 
-        // 중복 체크 (일반 예약 + 정기 회의 모두)
         const allRes = await getDocs(collection(db, "reservations"));
         const allRec = await getDocs(collection(db, "recurringMeetings"));
         let duplicated = false;
 
         for (const c of targets) {
-            const start = buildDate(c.dataset.date, c.dataset.time);
+            const start  = buildDate(c.dataset.date, c.dataset.time);
             const dayIdx = getDayIndexFromDateStr(c.dataset.date);
             const hour   = parseInt(c.dataset.time);
 
@@ -359,7 +352,7 @@ async function openReservePopup(date, time, cell, existing = null) {
 
         const baseData = {
             roomId: selectedRoomId, title: meetingTitle, dept, projectId, projectName, participants,
-            createdBy: currentUserId, createdByName: userName, createdAt: new Date()
+            createdBy: currentUserId, createdByName: userName, creatorRole: currentUserRole, createdAt: new Date()
         };
 
         for (const c of targets) {
@@ -368,15 +361,13 @@ async function openReservePopup(date, time, cell, existing = null) {
             end.setHours(start.getHours() + 1);
 
             if (existing && !window._multiCells) {
-                // 수정
                 await updateDoc(doc(db, "reservations", existing.id), { ...baseData, startTime: start, endTime: end });
             } else {
-                // 신규
                 await addDoc(collection(db, "reservations"), { ...baseData, startTime: start, endTime: end });
             }
         }
 
-        selectedCells    = [];
+        selectedCells      = [];
         window._multiCells = null;
         document.getElementById("reservePopup").style.display = "none";
         renderSchedule();
@@ -391,21 +382,23 @@ async function openRecurringManager() {
     document.getElementById("recurringModal").style.display = "block";
     await loadRecurringList();
 
-    // 회의실 목록
     const rRoom = document.getElementById("rRoom");
     rRoom.innerHTML = roomsCache.map(r => `<option value="${r.id}">${r.name}</option>`).join("");
 
-    // 시간 목록
     const rTime = document.getElementById("rTime");
     rTime.innerHTML = HOURS.map(h => `<option value="${h.split(":")[0]}">${h}</option>`).join("");
 
-    // 부서
     const deptSet  = new Set();
     const userSnap = await getDocs(collection(db, "users"));
     userSnap.forEach(d => deptSet.add(d.data().dept));
 
     const rDept = document.getElementById("rDept");
-    rDept.innerHTML = [...deptSet].map(d => `<option value="${d}">${d}</option>`).join("");
+    rDept.innerHTML = "";
+    sortDepts(deptSet).forEach(dept => {
+        const opt = document.createElement("option");
+        opt.value = opt.text = dept;
+        rDept.appendChild(opt);
+    });
 
     await loadRProjectsByDept(rDept.value);
     await loadRUsersByDept(rDept.value);
@@ -454,26 +447,23 @@ async function loadRecurringList() {
 }
 
 async function saveRecurringMeeting() {
-    const roomId  = document.getElementById("rRoom").value;
+    const roomId    = document.getElementById("rRoom").value;
     const dayOfWeek = parseInt(document.getElementById("rDay").value);
     const startHour = parseInt(document.getElementById("rTime").value);
-    const title   = document.getElementById("rTitle").value.trim();
-    const dept    = document.getElementById("rDept").value;
-    const pSel    = document.getElementById("rProject");
+    const title     = document.getElementById("rTitle").value.trim();
+    const dept      = document.getElementById("rDept").value;
+    const pSel      = document.getElementById("rProject");
     const projectId   = pSel.value;
     const projectName = pSel.options[pSel.selectedIndex]?.text || "";
     const participants = [...document.querySelectorAll("#rUserList input:checked")].map(c => c.value);
 
     if (!title) { alert("회의 제목을 입력하세요"); return; }
 
-    // 중복 정기 회의 체크
     const existing = await getDocs(collection(db, "recurringMeetings"));
     let duplicated = false;
     existing.forEach(d => {
         const data = d.data();
-        if (data.roomId === roomId && data.dayOfWeek === dayOfWeek && data.startHour === startHour) {
-            duplicated = true;
-        }
+        if (data.roomId === roomId && data.dayOfWeek === dayOfWeek && data.startHour === startHour) duplicated = true;
     });
     if (duplicated) { alert("해당 요일/시간에 이미 정기 회의가 등록되어 있습니다."); return; }
 
@@ -485,11 +475,10 @@ async function saveRecurringMeeting() {
         roomId, roomName: room?.name || "",
         dayOfWeek, startHour, title,
         dept, projectId, projectName, participants,
-        createdBy: currentUserId, createdByName: userName,
+        createdBy: currentUserId, createdByName: userName, creatorRole: currentUserRole,
         createdAt: new Date()
     });
 
-    // 폼 초기화
     document.getElementById("rTitle").value = "";
     document.querySelectorAll("#rUserList input:checked").forEach(c => c.checked = false);
 
@@ -498,15 +487,25 @@ async function saveRecurringMeeting() {
     alert(`✅ "${title}" 정기 회의가 등록되었습니다`);
 }
 
+// ── PROJECT / USER LOADERS ─────────────────────────────────
+function getNumericId(id) {
+    return Number(id.replace(/[^0-9]/g, ""));
+}
+
 async function loadRProjectsByDept(dept) {
-    const sel  = document.getElementById("rProject");
+    const sel = document.getElementById("rProject");
     sel.innerHTML = "";
     const snap = await getDocs(collection(db, "projects"));
+    const projects = [];
     snap.forEach(d => {
         const data = d.data();
-        if (data.dept !== dept) return;
+        if (dept !== "에너지부문" && data.dept !== dept) return;
+        projects.push({ id: d.id, name: data.name });
+    });
+    projects.sort((a, b) => getNumericId(b.id) - getNumericId(a.id));
+    projects.forEach(p => {
         const opt = document.createElement("option");
-        opt.value = d.id; opt.text = data.name;
+        opt.value = p.id; opt.text = p.name;
         sel.appendChild(opt);
     });
 }
@@ -515,28 +514,37 @@ async function loadRUsersByDept(dept) {
     const list = document.getElementById("rUserList");
     list.innerHTML = "";
     const snap = await getDocs(collection(db, "users"));
+    const users = [];
     snap.forEach(d => {
         const user = d.data();
-        if (user.dept !== dept) return;
+        if (dept !== "에너지부문" && user.dept !== dept) return;
+        users.push({ id: d.id, name: user.name });
+    });
+    users.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+    users.forEach(u => {
         const label = document.createElement("label");
         const chk   = document.createElement("input");
-        chk.type = "checkbox"; chk.value = d.id;
+        chk.type = "checkbox"; chk.value = u.id;
         label.appendChild(chk);
-        label.appendChild(document.createTextNode(user.name));
+        label.appendChild(document.createTextNode(u.name));
         list.appendChild(label);
     });
 }
 
-// ── DEPT / PROJECT / USER LOADERS (reserve popup) ─────────
 async function loadProjectsByDept(dept) {
-    const sel  = document.getElementById("projectSelect");
+    const sel = document.getElementById("projectSelect");
     sel.innerHTML = "";
     const snap = await getDocs(collection(db, "projects"));
+    const projects = [];
     snap.forEach(d => {
         const data = d.data();
-        if (data.dept !== dept) return;
+        if (dept !== "에너지부문" && data.dept !== dept) return;
+        projects.push({ id: d.id, name: data.name });
+    });
+    projects.sort((a, b) => getNumericId(b.id) - getNumericId(a.id));
+    projects.forEach(p => {
         const opt = document.createElement("option");
-        opt.value = d.id; opt.text = data.name;
+        opt.value = p.id; opt.text = p.name;
         sel.appendChild(opt);
     });
 }
@@ -545,15 +553,20 @@ async function loadUsersByDept(dept) {
     const list = document.getElementById("userList");
     list.innerHTML = "";
     const snap = await getDocs(collection(db, "users"));
+    const users = [];
     snap.forEach(d => {
         const user = d.data();
-        if (user.dept !== dept) return;
+        if (dept !== "에너지부문" && user.dept !== dept) return;
+        users.push({ id: d.id, name: user.name });
+    });
+    users.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+    users.forEach(u => {
         const label = document.createElement("label");
         const chk   = document.createElement("input");
-        chk.type = "checkbox"; chk.value = d.id;
+        chk.type = "checkbox"; chk.value = u.id;
         chk.addEventListener("change", updateSelectedUsers);
         label.appendChild(chk);
-        label.appendChild(document.createTextNode(user.name));
+        label.appendChild(document.createTextNode(u.name));
         list.appendChild(label);
     });
     updateSelectedUsers();
@@ -584,9 +597,8 @@ function updateMultiButton() {
 async function uploadUsers() {
     const file = document.getElementById("userFile").files[0];
     if (!file) return;
-    const rows = XLSX.utils.sheet_to_json(
-        XLSX.read(await file.arrayBuffer()).Sheets[XLSX.read(await file.arrayBuffer()).SheetNames[0]]
-    );
+    const wb = XLSX.read(await file.arrayBuffer());
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
     for (const row of rows) {
         await setDoc(doc(db, "users", String(row.id)), { name: row.name, dept: row.dept, role: row.role || "user" });
     }
@@ -596,9 +608,8 @@ async function uploadUsers() {
 async function uploadProjects() {
     const file = document.getElementById("projectFile").files[0];
     if (!file) return;
-    const rows = XLSX.utils.sheet_to_json(
-        XLSX.read(await file.arrayBuffer()).Sheets[XLSX.read(await file.arrayBuffer()).SheetNames[0]]
-    );
+    const wb = XLSX.read(await file.arrayBuffer());
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
     for (const row of rows) {
         await setDoc(doc(db, "projects", String(row.id)), { name: row.name, dept: row.dept });
     }
@@ -624,17 +635,16 @@ window.openPwResetPanel     = openPwResetPanel;
 
 // ── PW RESET (관리자) ───────────────────────────────────────
 async function openPwResetPanel() {
-    const panel = document.getElementById("pwResetPanel");
+    const panel  = document.getElementById("pwResetPanel");
     const isOpen = panel.style.display === "block";
     panel.style.display = isOpen ? "none" : "block";
 
     if (!isOpen) {
-        // 사용자 목록 채우기
-        const sel = document.getElementById("pwResetUserSelect");
+        const sel  = document.getElementById("pwResetUserSelect");
         sel.innerHTML = "<option value=''>사용자 선택...</option>";
         const snap = await getDocs(collection(db, "users"));
         snap.forEach(d => {
-            const u = d.data();
+            const u   = d.data();
             const opt = document.createElement("option");
             opt.value = d.id;
             opt.text  = `${u.name} (${d.id}) - ${u.dept}`;
@@ -644,16 +654,16 @@ async function openPwResetPanel() {
 }
 
 async function resetUserPassword() {
-    const sel    = document.getElementById("pwResetUserSelect");
-    const userId = sel.value;
+    const sel      = document.getElementById("pwResetUserSelect");
+    const userId   = sel.value;
     const userName = sel.options[sel.selectedIndex]?.text;
 
     if (!userId) { alert("사용자를 선택하세요"); return; }
-    if (!confirm(`${userName}의 비밀번호를 0000으로 리셋하시겠습니까?`)) return;
+    if (!confirm(`${userName}의 비밀번호를 사용자 ID로 리셋하시겠습니까?`)) return;
 
     try {
         await updateDoc(doc(db, "users", userId), { password: null });
-        alert(`✅ ${userName.split(" ")[0]}의 비밀번호가 0000으로 리셋되었습니다`);
+        alert(`✅ ${userName.split(" ")[0]}의 비밀번호가 사용자 ID로 리셋되었습니다`);
         sel.value = "";
     } catch(e) {
         alert("리셋 실패: " + e.message);
@@ -679,20 +689,24 @@ document.getElementById("pwSaveBtn").addEventListener("click", async () => {
     const newPw     = document.getElementById("newPw").value.trim();
     const confirmPw = document.getElementById("confirmPw").value.trim();
 
-    if (!/^\d{4}$/.test(newPw)) {
-        alert("숫자 4자리를 입력하세요");
+    if (!/^\d{6}$/.test(newPw)) {
+        alert("숫자 6자리를 입력하세요");
         return;
     }
     if (newPw !== confirmPw) {
         alert("비밀번호가 일치하지 않습니다");
         return;
     }
-    if (newPw === "0000") {
-        alert("0000은 초기 비밀번호입니다. 다른 번호를 사용하세요");
+    if (newPw === currentUserId) {
+        alert("사용자 ID는 초기 비밀번호입니다. 다른 번호를 사용하세요");
         return;
     }
 
-    await updateDoc(doc(db, "users", currentUserId), { password: newPw });
-    closePwPopup();
-    alert("✅ 비밀번호가 변경되었습니다");
+    try {
+        await updateDoc(doc(db, "users", currentUserId), { password: newPw });
+        closePwPopup();
+        alert("✅ 비밀번호가 변경되었습니다");
+    } catch(e) {
+        alert("저장 실패: " + e.message);
+    }
 });

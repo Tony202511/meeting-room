@@ -20,10 +20,10 @@
     --recurring-color: #f5c842;
     --recurring-dim: rgba(245,200,66,0.12);
     --reserved-bg: #1e2d50;
-    --reserved-text: #7bb3ff;
+    --reserved-text: #b3d8ff;
     --text: #e8eaf0;
     --text-muted: #7880a0;
-    --text-dim: #4a5070;
+    --text-dim: #a8d0ff;
     --radius: 10px;
     --radius-sm: 6px;
     --shadow-lg: 0 8px 48px rgba(0,0,0,0.7);
@@ -129,19 +129,20 @@
   /* TABLE */
   #scheduleArea table { border-collapse: separate; border-spacing: 2px; width: max-content; min-width: 100%; }
   #scheduleArea th {
-    font-size: 11px; font-weight: 600; color: var(--text-muted); padding: 8px 6px;
+    font-size: 12px; font-weight: 600; color: var(--text-muted); padding: 8px 6px;
     text-align: center; white-space: nowrap; background: var(--surface2); border-radius: 4px;
   }
   #scheduleArea th:first-child { background: transparent; }
   #scheduleArea td:first-child {
-    font-family: 'DM Mono', monospace; font-size: 11px; color: var(--text-muted);
+    font-family: 'DM Mono', monospace; font-size: 12px; color: var(--text-muted);
     padding: 0 10px 0 0; white-space: nowrap; text-align: right; vertical-align: middle; width: 44px;
   }
   .cell {
-    width: 90px; height: 62px; background: var(--surface2); border-radius: 4px;
+    width: 90px; max-width: 90px; height: 62px; background: var(--surface2); border-radius: 4px;
     cursor: pointer; transition: background 0.15s, transform 0.1s;
     vertical-align: top; padding: 4px 6px; overflow: hidden; position: relative;
   }
+  .cell > div { width: 0; min-width: 100%; }
   .cell:hover { background: var(--primary-dim); transform: scale(1.02); }
   .cell.selected { background: var(--primary-dim); outline: 2px solid var(--primary); outline-offset: -2px; }
   .cell.reserved { background: var(--reserved-bg); cursor: pointer; }
@@ -370,7 +371,7 @@
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">에너지부문</div>
+  <div class="logo" style="font-size: 15px; font-weight: 800;">에너지부문</div>
   <span id="welcome"></span>
   <button id="logoutBtn">로그아웃</button>
 </div>
@@ -381,7 +382,7 @@
     <h2>회의실 예약</h2>
     <p>사번을 입력하여 로그인하세요</p>
     <input type="text" id="empNo" placeholder="사번 입력" maxlength="10">
-    <input type="password" id="loginPw" placeholder="비밀번호 입력 (초기: 0000)" maxlength="4" autocomplete="off">
+    <input type="password" id="loginPw" placeholder="비밀번호 입력 (초기: 사용자 ID)" maxlength="6" autocomplete="off">
     <button id="loginBtn">로그인</button>
   </div>
 </div>
@@ -391,7 +392,7 @@
   <div class="layout">
 
     <div class="sidebar">
-      <h4>3F 회의실</h4>
+      <h4 style="font-size: 15px; font-weight: 700;">3F 회의실</h4>
       <ul id="roomList"></ul>
     </div>
 
@@ -434,7 +435,7 @@
         </div>
         <!-- 비밀번호 리셋 패널 -->
         <div id="pwResetPanel" style="display:none; margin-bottom:16px; padding:16px; background:var(--surface2); border-radius:var(--radius-sm); border:1px solid var(--border);">
-          <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px;">비밀번호 리셋 (→ 0000)</div>
+          <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px;">비밀번호 리셋 (→ 6323)</div>
           <div style="display:flex;gap:8px;align-items:center;">
             <select id="pwResetUserSelect" style="flex:1;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:13px;font-family:inherit;outline:none;-webkit-appearance:none;">
               <option value="">사용자 선택...</option>
@@ -562,10 +563,10 @@
 <!-- PW CHANGE POPUP -->
 <div id="pwPopup">
   <h3>🔑 비밀번호 변경</h3>
-  <p>초기 비밀번호(0000)를 사용 중입니다.<br>숫자 4자리로 변경해 주세요.</p>
+  <p>초기 비밀번호(사용자 ID)를 사용 중입니다.<br>숫자 6자리로 변경해 주세요.</p>
   <div class="pw-inputs">
-    <input type="password" id="newPw"     placeholder="새 비밀번호 (4자리)" maxlength="4" inputmode="numeric" autocomplete="off">
-    <input type="password" id="confirmPw" placeholder="비밀번호 확인"        maxlength="4" inputmode="numeric" autocomplete="off">
+    <input type="password" id="newPw"     placeholder="새 비밀번호 (6자리)" maxlength="6" inputmode="numeric" autocomplete="off">
+    <input type="password" id="confirmPw" placeholder="비밀번호 확인"        maxlength="6" inputmode="numeric" autocomplete="off">
   </div>
   <div class="pw-actions">
     <button id="pwSkipBtn">다음에</button>
