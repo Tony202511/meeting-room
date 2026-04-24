@@ -21,6 +21,7 @@ let currentUserRole  = null;
 let selectedCells    = [];
 let roomsCache       = [];
 let editingRecurringId = null;  // 수정 중인 정기회의 ID (null=신규)
+let pageOffset       = 0;       // 0 = 오늘부터 2주, 14 = 2주 후부터 2주, ...
 
 // ── 캐시 ───────────────────────────────────────────────────
 const reservationsByRoom = {};  // { roomId: [...] }  룸별 예약 캐시
@@ -29,9 +30,12 @@ let usersCache           = [];  // 사용자 전체
 let projectsCache        = [];  // 프로젝트 전체
 
 // 현재 선택된 룸의 예약 배열 반환 (없으면 빈 배열)
-function getRoomReservations() { return reservationsByRoom[selectedRoomId] || []; }
+function cacheKey() { return `${selectedRoomId}:${pageOffset}`; }
+function getRoomReservations() { return reservationsByRoom[cacheKey()] || []; }
 // 현재 선택된 룸의 예약 배열 교체
-function setRoomReservations(arr) { reservationsByRoom[selectedRoomId] = arr; }
+function setRoomReservations(arr) { reservationsByRoom[cacheKey()] = arr; }
+// 쓰기(저장/삭제) 후 캐시 무효화 → 다음 loadReservations()에서 재조회
+function invalidateRoomCache() { delete reservationsByRoom[cacheKey()]; }
 
 const WEEK  = ["일","월","화","수","목","금","토"];
 const HOURS = [
@@ -101,6 +105,7 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
             li.classList.add("active");
             selectedRoomId   = d.id;
             selectedRoomName = room.name;
+            pageOffset = 0;
             renderSchedule();
         });
         roomList.appendChild(li);
@@ -147,9 +152,13 @@ function renderSchedule() {
     const today = new Date();
     for (let i = 0; i < 14; i++) {
         const d = new Date(today);
-        d.setDate(today.getDate() + i);
+        d.setDate(today.getDate() + pageOffset + i);
         days.push({ label: `${d.getMonth()+1}/${d.getDate()}(${WEEK[d.getDay()]})`, day: d.getDay() });
     }
+
+    // 날짜 범위 표시 & 이전 버튼 활성화 여부
+    document.getElementById("pagePrevBtn").disabled = (pageOffset === 0);
+    document.getElementById("pageNextBtn").disabled = (pageOffset >= 14);
 
     function makeTimeLabel(h) {
         const [hh,mm] = h.split(":").map(Number);
@@ -200,25 +209,38 @@ function renderSchedule() {
     });
 }
 
+// ── SCHEDULE PAGE NAV ──────────────────────────────────────
+document.getElementById("pagePrevBtn").addEventListener("click", () => {
+    if (pageOffset === 0) return;
+    pageOffset -= 14;
+    selectedCells = [];
+    renderSchedule();
+});
+document.getElementById("pageNextBtn").addEventListener("click", () => {
+    if (pageOffset >= 14) return;
+    pageOffset += 14;
+    selectedCells = [];
+    renderSchedule();
+});
+
 // ── LOAD RESERVATIONS ──────────────────────────────────────
 async function loadReservations() {
     // 같은 룸을 다시 열었을 때는 Firestore 재호출 없이 캐시 사용
-    if (!reservationsByRoom[selectedRoomId]) {
-        const rangeStart = new Date(); rangeStart.setHours(0,0,0,0);
-        const rangeEnd   = new Date(); rangeEnd.setDate(rangeEnd.getDate()+14); rangeEnd.setHours(23,59,59,999);
+    if (!reservationsByRoom[cacheKey()]) {
+        const rangeStart = new Date(); rangeStart.setDate(rangeStart.getDate()+pageOffset);    rangeStart.setHours(0,0,0,0);
+        const rangeEnd   = new Date(); rangeEnd.setDate(rangeEnd.getDate()+pageOffset+14);     rangeEnd.setHours(23,59,59,999);
 
+        // 복합 인덱스 필요: roomId ASC + startTime ASC
+        // Firebase 콘솔 → Firestore → 인덱스 → 복합 인덱스 추가
         const resQuery = query(
             collection(db, "reservations"),
-            where("roomId", "==", selectedRoomId)
+            where("roomId",    "==", selectedRoomId),
+            where("startTime", ">=", rangeStart),
+            where("startTime", "<=", rangeEnd)
         );
         const snap = await getDocs(resQuery);
         setRoomReservations(
-            snap.docs
-                .map(d => ({ id: d.id, ...d.data() }))
-                .filter(d => {
-                    const s = d.startTime.toDate();
-                    return s >= rangeStart && s <= rangeEnd;
-                })
+            snap.docs.map(d => ({ id: d.id, ...d.data() }))
         );
     }
 
@@ -231,7 +253,7 @@ async function loadReservations() {
         const slots     = Math.round((endMins - startMins) / 30);
         const timeStr   = minsToTimeStr(startMins);
         const dn = data.creatorRole === "admin" ? "관리자" : data.createdByName;
-        setCell(dateStr, timeStr, "reserved", data.title || dn, data.projectName, false, dn, slots);
+        setCell(dateStr, timeStr, "reserved", data.title || dn, data.projectName, false, dn, slots, data.dept);
     });
 
     // 정기 회의: recurringCache 사용 (추가 Firestore 조회 없음)
@@ -252,7 +274,7 @@ async function loadReservations() {
     });
 }
 
-function setCell(dateStr, timeStr, cssClass, nameTxt, projectTxt, isRecurring, creatorName, slots=1) {
+function setCell(dateStr, timeStr, cssClass, nameTxt, projectTxt, isRecurring, creatorName, slots=1, dept="") {
     const cell = document.querySelector(`.cell[data-date="${dateStr}"][data-time="${timeStr}"]`);
     if (!cell) return;
     if (slots > 1) {
@@ -264,6 +286,11 @@ function setCell(dateStr, timeStr, cssClass, nameTxt, projectTxt, isRecurring, c
         }
     }
     cell.classList.add(cssClass);
+    // 일반 예약에만 부서 색상 적용
+    if (cssClass === "reserved") {
+        const deptIdx = DEPT_ORDER.indexOf(dept);
+        cell.classList.add(deptIdx >= 0 ? `dept-${deptIdx}` : "dept-etc");
+    }
     cell.style.display = "";
     cell.style.verticalAlign = "top";
     cell.innerHTML = `
@@ -322,6 +349,7 @@ async function openReservePopup(date, time, cell, existing=null) {
     document.getElementById("reserveTitle").disabled  = !editable;
     document.getElementById("deptSelect").disabled    = !editable;
     document.getElementById("projectSelect").disabled = !editable;
+    document.getElementById("userSearch").disabled    = !editable;
 
     // 제목: 다중 선택 시 전체 날짜/시간 표시
     if (isRecurring) {
@@ -396,7 +424,7 @@ async function openReservePopup(date, time, cell, existing=null) {
         if (!confirm(`이 ${label} 삭제하시겠습니까?`)) return;
         await deleteDoc(doc(db, isRecurring ? "recurringMeetings" : "reservations", existing.id));
         if (isRecurring) recurringCache = recurringCache.filter(r => r.id !== existing.id);
-        else             setRoomReservations(getRoomReservations().filter(r => r.id !== existing.id));
+        else             invalidateRoomCache();
         document.getElementById("reservePopup").style.display = "none";
         renderSchedule();
     };
@@ -449,6 +477,8 @@ async function openReservePopup(date, time, cell, existing=null) {
 
         const byDate = {};
         targets.forEach(c => { if (!byDate[c.dataset.date]) byDate[c.dataset.date]=[]; byDate[c.dataset.date].push(c.dataset.time); });
+
+        const batch = writeBatch(db);
         for (const [dateStr, times] of Object.entries(byDate)) {
             times.sort((a,b) => timeStrToMins(a)-timeStrToMins(b));
             const groups = [[times[0]]];
@@ -462,14 +492,14 @@ async function openReservePopup(date, time, cell, existing=null) {
                 end.setMinutes(end.getMinutes()+30);
                 const payload = { ...baseData, startTime: start, endTime: end };
                 if (existing && !window._multiCells) {
-                    await updateDoc(doc(db,"reservations",existing.id), payload);
-                    setRoomReservations(getRoomReservations().map(r => r.id===existing.id ? {id:existing.id,...payload} : r));
+                    batch.update(doc(db, "reservations", existing.id), payload);
                 } else {
-                    const ref = await addDoc(collection(db,"reservations"), payload);
-                    setRoomReservations([...getRoomReservations(), { id: ref.id, ...payload }]);
+                    batch.set(doc(collection(db, "reservations")), payload);
                 }
             }
         }
+        await batch.commit();
+        invalidateRoomCache();
 
         selectedCells      = [];
         window._multiCells = null;
@@ -698,12 +728,26 @@ function updateMultiButton() {
     document.getElementById("multiReserveBtn").disabled = selectedCells.length === 0;
 }
 
+// ── XLSX LAZY LOADER ───────────────────────────────────────
+async function ensureXLSX() {
+    if (!window.XLSX) {
+        await new Promise((resolve, reject) => {
+            const s = document.createElement("script");
+            s.src = "https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js";
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
+        });
+    }
+}
+
 // ── ADMIN UPLOADS ──────────────────────────────────────────
 async function uploadUsers() {
     const file = document.getElementById("userFile").files[0];
     if (!file) return;
     if (!confirm("기존 사용자 데이터를 모두 삭제하고 새 파일로 교체합니다. 계속하시겠습니까?")) return;
 
+    await ensureXLSX();
     const wb   = XLSX.read(await file.arrayBuffer());
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
     if (!rows.length) { alert("파일에 데이터가 없습니다."); return; }
@@ -740,6 +784,7 @@ async function uploadProjects() {
     if (!file) return;
     if (!confirm("기존 프로젝트 데이터를 모두 삭제하고 새 파일로 교체합니다. 계속하시겠습니까?")) return;
 
+    await ensureXLSX();
     const wb   = XLSX.read(await file.arrayBuffer());
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
     if (!rows.length) { alert("파일에 데이터가 없습니다."); return; }
